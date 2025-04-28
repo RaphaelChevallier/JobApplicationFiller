@@ -1,43 +1,99 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import { signOut } from './actions'
-import Link from 'next/link'
+import { signOut, updateProfile } from './actions'
+import AccountTabs from './account-tabs'
+import { type Profile, type Education } from '@/types/database'
 
-export default async function AccountPage() {
-  const supabase = createClient()
+// Define the Profile type based on your schema - expanded
+// export type Profile = {
+//   id: string
+//   updated_at: string | null
+//   username: string | null
+//   full_name: string | null
+//   avatar_url: string | null
+//   website: string | null
+//   // Added fields
+//   first_name: string | null
+//   last_name: string | null
+//   phone: string | null
+//   location: string | null
+//   resume_url: string | null
+//   cover_letter_url: string | null
+// }
 
-  const { data: { user } } = await supabase.auth.getUser()
+// Define Education type (adjust based on final implementation if needed)
+// export type Education = {
+//   id: string
+//   user_id: string
+//   school_name: string
+//   degree: string | null // Match the enum type from migration
+//   field_of_study: string | null
+//   start_date: string | null // Use string for date inputs initially
+//   end_date: string | null
+//   created_at: string
+//   updated_at: string
+// }
 
-  if (!user) {
-    // This should technically be handled by middleware, but double-checking
-    return redirect('/login')
+export default async function AccountPage({ searchParams }: { searchParams: { message?: string, error?: string } }) {
+  const supabase = await createClient()
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return redirect('/login?message=Could not authenticate user')
+  }
+
+  // Fetch profile data
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single<Profile>() // Specify the type here
+
+   // Fetch education data
+  const { data: educationData, error: educationError } = await supabase
+    .from('education')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('end_date', { ascending: false })
+
+  // Handle profile fetch errors (optional: show specific message)
+  if (profileError && profileError.code !== 'PGRST116') {
+    console.error('Error fetching profile:', profileError)
+    // searchParams.error = "Could not load profile data."; // Example: Set error for display
+  }
+   // Handle education fetch errors (optional: show specific message)
+  if (educationError) {
+    console.error('Error fetching education:', educationError)
+    // searchParams.error = (searchParams.error ? searchParams.error + "; " : "") + "Could not load education data.";
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
-      <div className="w-full max-w-lg p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
-        <h1 className="text-2xl font-bold text-center text-gray-900 dark:text-white">Account</h1>
-        <p className="text-center text-gray-700 dark:text-gray-300">
-          Welcome, {user.email}!
-        </p>
+    <div className="flex flex-col items-center pt-16 pb-8 bg-gray-100 dark:bg-gray-900 min-h-screen">
+      <div className="w-full max-w-4xl p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+        <h1 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-6">Account Management</h1>
 
-        {/* Placeholder for future profile form */}
-        <div className="p-4 my-4 border border-dashed border-gray-300 dark:border-gray-600 rounded-md text-center text-gray-500 dark:text-gray-400">
-          <p>Your job application profile details will go here.</p>
-          <Link href="/account/profile" className="text-blue-600 hover:underline dark:text-blue-400">
-             Edit Profile (Coming Soon)
-          </Link>
-        </div>
+        {/* Display Success/Error Messages - Moved inside tabs potentially or kept global */}
+        {searchParams.message && (
+          <div className="p-3 mb-4 text-sm text-green-700 bg-green-100 rounded-lg dark:bg-green-200 dark:text-green-800" role="alert">
+            {searchParams.message}
+          </div>
+        )}
+        {searchParams.error && (
+          <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">
+            {searchParams.error}
+          </div>
+        )}
 
-        {/* Sign Out Button */}
-        <form action={signOut}>
-          <button 
-            type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:focus:ring-offset-gray-800"
-          >
-            Sign Out
-          </button>
-        </form>
+        {/* Tab Component - Pass necessary data and actions */}
+        <AccountTabs 
+          user={user} 
+          profile={profile} 
+          education={educationData || []} 
+          updateProfile={updateProfile} 
+          signOut={signOut} 
+        />
+
       </div>
     </div>
   )

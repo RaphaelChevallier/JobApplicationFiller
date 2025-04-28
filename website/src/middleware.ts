@@ -57,18 +57,28 @@ export async function middleware(request: NextRequest) {
   )
 
   // Refresh session if expired - required for Server Components
-  const { data: { session } } = await supabase.auth.getSession()
+  // Important: getUser checks the session on the server, potentially refreshing it.
+  // This replaces the need for a separate getSession call for the check below.
+  const { data: { user }, error } = await supabase.auth.getUser()
 
-  // If no session and the route is protected, redirect to login
-  if (!session && request.nextUrl.pathname.startsWith('/account')) { // Add other protected routes here
+  // Handle potential errors from getUser, though unlikely in typical flows unless network issues occur.
+  // You might want to log this error or handle it differently based on your app's needs.
+  if (error) {
+    console.error('Error fetching user in middleware:', error)
+    // Decide how to proceed. Maybe allow access or redirect to an error page?
+    // For now, we'll proceed as if no user is found, which leads to redirection for protected routes.
+  }
+
+  // If no user and the route is protected, redirect to login
+  if (!user && request.nextUrl.pathname.startsWith('/account')) { // Add other protected routes here
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
     redirectUrl.searchParams.set(`redirectedFrom`, request.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
   }
 
-   // If session exists and user tries to access login/signup, redirect to account
-    if (session && (request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/signup'))) {
+   // If user exists and tries to access login/signup, redirect to account
+    if (user && (request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/signup'))) {
         const redirectUrl = request.nextUrl.clone()
         redirectUrl.pathname = '/account'
         return NextResponse.redirect(redirectUrl)
