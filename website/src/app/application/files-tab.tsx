@@ -1,9 +1,9 @@
 'use client'
 
 import React, { useState } from 'react'
-import FileUploader from './file-uploader'
-import { updateProfile } from './actions' // Assuming updateProfile handles file URL updates
-import type { Profile } from '@/types/database' // Use the correct path
+import FileUploader from './file-uploader' // Correct path
+import { updateProfile } from './actions' // Correct path
+import type { Profile } from '@/types/database'
 
 interface FilesTabProps {
   profile: Profile | null

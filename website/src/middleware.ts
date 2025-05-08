@@ -70,17 +70,17 @@ export async function middleware(request: NextRequest) {
   }
 
   // If no user and the route is protected, redirect to login
-  if (!user && request.nextUrl.pathname.startsWith('/account')) { // Add other protected routes here
+  if (!user && (request.nextUrl.pathname.startsWith('/application') || request.nextUrl.pathname.startsWith('/account-settings'))) {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
     redirectUrl.searchParams.set(`redirectedFrom`, request.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
   }
 
-   // If user exists and tries to access login/signup, redirect to account
+   // If user exists and tries to access login/signup, redirect to application page
     if (user && (request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/signup'))) {
         const redirectUrl = request.nextUrl.clone()
-        redirectUrl.pathname = '/account'
+        redirectUrl.pathname = '/application'
         return NextResponse.redirect(redirectUrl)
     }
 
@@ -104,7 +104,8 @@ export const config = {
      */
     '/((?!_next/static|_next/image|favicon.ico|api/|auth/).*)',
     // Explicitly match protected routes and auth routes for redirection logic
-     '/account/:path*',
+     '/application/:path*',
+     '/account-settings/:path*',
      '/login',
      '/signup',
   ],

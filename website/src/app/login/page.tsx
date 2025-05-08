@@ -10,6 +10,7 @@ export default function LoginPage() {
   const message = searchParams.get('message');
   const error = searchParams.get('error'); // Also handle potential error messages
   const [displayMessage, setDisplayMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     // Set the message to display, prioritize error over general message
@@ -102,4 +103,4 @@ export default function LoginPage() {
       </div>
     </div>
   );
-} 
+}

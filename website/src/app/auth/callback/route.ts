@@ -9,11 +9,11 @@ export async function GET(request: Request) {
   const origin = requestUrl.origin
 
   if (code) {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-        // Redirect to the account page after successful login
-      return NextResponse.redirect(`${origin}/account`) // We'll create this page later
+        // Redirect to the application page after successful login
+      return NextResponse.redirect(`${origin}/application`) // Updated from /account
     }
   }
 

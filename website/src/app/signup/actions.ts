@@ -16,7 +16,7 @@ export async function signup(formData: FormData) {
   // Await the async createClient function
   const supabase = await createClient()
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -27,14 +27,19 @@ export async function signup(formData: FormData) {
 
   if (error) {
     console.error('Signup error:', error.message)
-    // Redirect back to signup page with an error message
-    // Consider more specific error messages based on error.code
+    // Check if the error indicates the user already exists
+    // Note: Supabase error messages might change. 
+    // A more robust check might involve error codes or specific error types if available.
+    if (error.message.includes('User already registered')) {
+        // Redirect to login page with a specific message
+        return redirect('/login?error=Email already registered. Please log in.')
+    }
+    // Redirect back to signup page with a generic error for other issues
     return redirect('/signup?error=Could not create account')
   }
 
-  // Revalidate path or redirect to a page telling the user to check their email
-  // revalidatePath('/', 'layout') 
-  // For now, just redirect back to login or a success page
-  // A dedicated "Check your email" page would be better UX
+  // If signup is successful (even if user existed but wasn't confirmed), 
+  // always redirect to the login page with the "check email" message.
+  // Supabase handles sending the confirmation email regardless.
   return redirect('/login?message=Check email to continue sign up process') 
 } 

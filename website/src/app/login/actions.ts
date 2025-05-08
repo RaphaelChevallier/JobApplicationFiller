@@ -28,8 +28,8 @@ export async function login(formData: FormData) {
 
   // Revalidate path to ensure protected routes are updated
   revalidatePath('/', 'layout')
-  // Redirect to a protected route, e.g., account page
-  redirect('/account') // We'll create this page later
+  // Redirect to a protected route, e.g., application page
+  redirect('/application') // Updated from /account
 }
 
 export async function signInWithGoogle() {

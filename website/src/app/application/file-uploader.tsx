@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useTransition } from 'react'
 import { createClient } from '@/utils/supabase/client' // Use client component Supabase client
-import { deleteProfileFile } from '@/app/account/actions' // Import the delete action
+import { deleteProfileFile } from '../application/actions' // UPDATED PATH
 
 interface FileUploaderProps {
   userId: string

@@ -3,8 +3,10 @@
 import { signup } from './actions';
 import { signInWithGoogle } from '../login/actions'; // Import Google action from login actions
 import Link from 'next/link';
+import { useState } from 'react';
 
 export default function SignupPage() {
+  const [loading, setLoading] = useState(false);
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
       <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
@@ -39,9 +41,21 @@ export default function SignupPage() {
           </div>
           <button
             type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 dark:focus:ring-offset-gray-800"
+            onClick={() => setLoading(true)}
+            disabled={loading}
+            className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 dark:focus:ring-offset-gray-800"
           >
-            Sign up with Email
+            {loading ? (
+              <>
+                <svg className="animate-spin h-5 w-5 mr-2 text-white" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+                Signing up...
+              </>
+            ) : (
+              "Sign up with Email"
+            )}
           </button>
         </form>
 
@@ -80,4 +94,4 @@ export default function SignupPage() {
       </div>
     </div>
   );
-} 
+}
