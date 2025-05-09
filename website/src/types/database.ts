@@ -11,7 +11,6 @@ export type Profile = {
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
-  location: string | null;
   resume_url: string | null;
   cover_letter_url: string | null;
   linkedin_url: string | null;
@@ -30,7 +29,7 @@ export type Profile = {
   state_province: string | null;
   zip_postal_code: string | null;
   country: string | null;
-  full_address: string | null;
+  location: string | null;
   force_exact_resume: boolean | null;
 };
 
@@ -67,6 +66,16 @@ export type Skill = {
   id: string;
   user_id: string;
   skill_name: string;
+  proficiency: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Language type
+export type Language = {
+  id: string;
+  user_id: string;
+  language_name: string;
   proficiency: string | null;
   created_at: string;
   updated_at: string;

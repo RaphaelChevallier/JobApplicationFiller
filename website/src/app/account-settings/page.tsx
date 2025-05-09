@@ -110,7 +110,7 @@ export default async function AccountSettingsPage({ searchParams }: { searchPara
           <div className="p-6 bg-red-50/50 dark:bg-red-950/70 backdrop-blur-lg rounded-xl border border-red-200/40 dark:border-red-800/50 shadow-xl">
             <h2 className="text-xl font-semibold text-red-700 dark:text-red-400 mb-4">Danger Zone</h2>
             
-            <div className="space-y-3">
+            <div className="flex flex-wrap gap-3">
               <button className="px-4 py-2 text-sm font-medium bg-red-500/20 dark:bg-red-600/20 backdrop-blur-md border border-red-300/30 dark:border-red-500/20 text-red-900 dark:text-red-300 rounded-lg shadow-lg hover:bg-red-500/40 dark:hover:bg-red-600/40 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-red-500/50 focus:outline-none cursor-pointer">
                 Cancel Subscription
               </button>

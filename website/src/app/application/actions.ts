@@ -54,7 +54,7 @@ export async function updateProfile(formData: FormData) {
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
-      return redirect('/login?message=Could not get user')
+      return { success: false, error: 'Could not get user' }
     }
 
     // Prepare update data, only including fields that are present in the form
@@ -101,13 +101,15 @@ export async function updateProfile(formData: FormData) {
     
     if (error) {
       console.error('Error updating profile:', error)
-      return redirect('/application?error=Could not update profile') // Updated redirect
+      return { success: false, error: 'Could not update profile: ' + error.message }
     }
 
-    return redirect('/application?message=Profile updated successfully') // Updated redirect
+    // Revalidate the page data without redirecting
+    revalidatePath('/application')
+    return { success: true }
   } catch (error) {
     console.error('Error in updateProfile:', error)
-    return redirect('/application?error=Could not update profile') // Updated redirect
+    return { success: false, error: 'Could not update profile' }
   }
 }
 

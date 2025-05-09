@@ -13,27 +13,42 @@ import {
 import FileUploader from './file-uploader'
 import SchoolAutocomplete from './school-autocomplete'
 import { createClient } from '@/utils/supabase/client'
+import toast, { Toaster } from 'react-hot-toast'
+import { profileSaveRateLimiter, fileUploadRateLimiter, createRateLimiter } from '@/utils/rate-limiter'
 
 // Helper function for input field class names (Glassmorphism) - Increased contrast
 const glassInputFieldClasses = "mt-1 block w-full px-3 py-2 rounded-md shadow-sm bg-white/20 dark:bg-black/20 border border-gray-300/50 dark:border-gray-700/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-gray-100";
 const glassInputDisabledClasses = "bg-gray-300/10 dark:bg-gray-700/10 text-gray-600 dark:text-gray-400 cursor-not-allowed";
 const glassInputLabelClasses = "block text-sm font-medium text-gray-800 dark:text-gray-200";
 
+// Create shared rate limiters for different tabs
+const languagesRateLimiter = createRateLimiter('language operation');
+const skillsRateLimiter = createRateLimiter('skill operation');
+const workExperienceRateLimiter = createRateLimiter('experience operation');
+const referencesRateLimiter = createRateLimiter('reference operation');
+
 // Placeholder components for tab content
-const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: any }) => {
+const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: (formData: FormData) => Promise<{ success: boolean, error?: string } | void> }) => {
   // State for controlled components
   const [firstName, setFirstName] = useState(profile?.first_name || '')
   const [lastName, setLastName] = useState(profile?.last_name || '')
   const [phone, setPhone] = useState(profile?.phone || '')
-  // const [location, setLocation] = useState(profile?.location || '') // Old location state removed
 
   // New address fields state
   const [streetAddress, setStreetAddress] = useState(profile?.street_address || '');
   const [addressLine2, setAddressLine2] = useState(profile?.address_line_2 || '');
   const [city, setCity] = useState(profile?.city || '');
   const [selectedCountry, setSelectedCountry] = useState(profile?.country || 'United States'); // Default to US
+  const [countryInput, setCountryInput] = useState('');
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   const [stateProvince, setStateProvince] = useState(profile?.state_province || '');
   const [zipPostalCode, setZipPostalCode] = useState(profile?.zip_postal_code || '');
+  
+  // State for loading/saving status
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Country options
+  const countries = ["United States", "Canada"];
 
   // Update state if profile data loads after initial render
   useEffect(() => {
@@ -41,20 +56,22 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
       setFirstName(profile.first_name || '')
       setLastName(profile.last_name || '')
       setPhone(profile.phone || '')
-      // setLocation(profile.location || '') // Old location state removed
 
       // Populate new address fields
       setStreetAddress(profile.street_address || '');
       setAddressLine2(profile.address_line_2 || '');
       setCity(profile.city || '');
-      setSelectedCountry(profile.country || 'United States');
+      
+      // Set the country - this handles both dropdown selections and custom entries
+      const country = profile.country || 'United States';
+      setSelectedCountry(country);
+      
       setStateProvince(profile.state_province || '');
       setZipPostalCode(profile.zip_postal_code || '');
     }
   }, [profile])
 
-  // Data for Country and State/Province dropdowns
-  const countries = ["United States", "Canada", "Other"];
+  // Data for State/Province dropdowns
   const usStates = [
     'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 
     'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 
@@ -68,31 +85,129 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
     'Prince Edward Island', 'Quebec', 'Saskatchewan', 'Northwest Territories', 'Nunavut', 'Yukon'
   ];
 
-  const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedCountry(e.target.value);
-    setStateProvince(''); 
+  // Handle country change from dropdown
+  const handleCountryDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    setSelectedCountry(value);
+    setStateProvince('');
+  };
+
+  // Handle direct country input
+  const handleCountryInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSelectedCountry(value);
+    setCountryInput(value);
+    setShowCountryDropdown(true);
+    
+    // If the country is changed to something other than US/Canada, clear state/province
+    if (value !== 'United States' && value !== 'Canada') {
+      setStateProvince('');
+    }
+  };
+
+  // Handle country selection from dropdown
+  const selectCountry = (country: string) => {
+    setSelectedCountry(country);
+    setCountryInput('');
+    setShowCountryDropdown(false);
+    
+    // Clear state/province when switching countries
+    setStateProvince('');
   };
   
   const getStateProvinceLabel = () => {
     if (selectedCountry === "United States") return "State";
     if (selectedCountry === "Canada") return "Province";
-    return "State / Province";
+    return "Province / Region";
   };
 
   const getZipPostalLabel = () => {
     if (selectedCountry === "United States") return "Zip Code";
     if (selectedCountry === "Canada") return "Postal Code";
-    return "Zip/Postal Code";
+    return "Postal / Zip Code";
   };
 
-  // Callback for LocationAutocomplete (REMOVED)
-  // const handleLocationSelect = (selectedLocation: string) => {
-  //   setLocation(selectedLocation); 
-  // };
+  // Custom form submission handler
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    
+    // Check rate limiter before proceeding
+    const rateLimit = profileSaveRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many save attempts. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
+    setIsSaving(true);
+    
+    const formData = new FormData(event.currentTarget);
+    
+    // Ensure country is not null - default to United States if empty
+    if (!formData.get('country') || formData.get('country') === '') {
+      formData.set('country', 'United States');
+    }
+    
+    try {
+      const result = await updateProfile(formData);
+      
+      if (!result) {
+        // If void is returned (old behavior), show a generic success message
+        toast.success('Profile updated successfully', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#D1FAE5',
+            color: '#065F46',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      } else if (result.success) {
+        toast.success('Profile updated successfully', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#D1FAE5',
+            color: '#065F46',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      } else {
+        toast.error(result.error || 'Failed to update profile', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#FEE2E2',
+            color: '#991B1B',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      }
+    } catch (error) {
+      toast.error('An unexpected error occurred', {
+        duration: 10000,
+        position: 'bottom-right',
+      });
+      console.error('Form submission error:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     // Glassmorphism Form Container
-    <form action={updateProfile} className="space-y-6 mt-6 p-6 bg-blue-50/50 dark:bg-indigo-950/70 backdrop-blur-lg rounded-xl border border-blue-200/40 dark:border-indigo-800/50 shadow-xl">
+    <form onSubmit={handleSubmit} className="space-y-6 mt-6 p-6 bg-blue-50/50 dark:bg-indigo-950/70 backdrop-blur-lg rounded-xl border border-blue-200/40 dark:border-indigo-800/50 shadow-xl">
       <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Main Information</h3>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -159,7 +274,7 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             <label htmlFor="addressLine2" className={glassInputLabelClasses}>Address Line 2 (Optional)</label>
             <input 
               id="addressLine2" 
-              name="address_line_2" // Ensure name matches DB column
+              name="address_line_2"
               type="text" 
               value={addressLine2}
               onChange={(e) => setAddressLine2(e.target.value)}
@@ -172,7 +287,7 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             <label htmlFor="city" className={glassInputLabelClasses}>City</label>
             <input 
               id="city" 
-              name="city" // Ensure name matches DB column
+              name="city"
               type="text" 
               value={city}
               onChange={(e) => setCity(e.target.value)}
@@ -180,17 +295,35 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             />
           </div>
 
-          <div>
+          {/* Updated Country Input with Dropdown */}
+          <div className="relative">
             <label htmlFor="country" className={glassInputLabelClasses}>Country</label>
-            <select
-              id="country"
-              name="country" // Ensure name matches DB column
+            <input 
+              id="country" 
+              name="country"
+              type="text" 
               value={selectedCountry}
-              onChange={handleCountryChange}
-              className={glassInputFieldClasses}
-            >
-              {countries.map(c => <option key={c} value={c} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{c}</option>)}
-            </select>
+              onChange={handleCountryInputChange}
+              className={`${glassInputFieldClasses} w-full`}
+              placeholder="Select or type a country"
+              autoComplete="off"
+              onFocus={() => setShowCountryDropdown(true)}
+              onBlur={() => setTimeout(() => setShowCountryDropdown(false), 200)}
+              required
+            />
+            {showCountryDropdown && (
+              <div className="absolute left-0 right-0 z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700">
+                {countries.map(country => (
+                  <div 
+                    key={country} 
+                    className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                    onMouseDown={() => selectCountry(country)}
+                  >
+                    {country}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           
           <div>
@@ -198,7 +331,7 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             {selectedCountry === "United States" && (
               <select
                 id="stateProvince"
-                name="state_province" // Ensure name matches DB column
+                name="state_province"
                 value={stateProvince}
                 onChange={(e) => setStateProvince(e.target.value)}
                 className={glassInputFieldClasses}
@@ -210,7 +343,7 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             {selectedCountry === "Canada" && (
               <select
                 id="stateProvince"
-                name="state_province" // Ensure name matches DB column
+                name="state_province"
                 value={stateProvince}
                 onChange={(e) => setStateProvince(e.target.value)}
                 className={glassInputFieldClasses}
@@ -222,12 +355,12 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             {(selectedCountry !== "United States" && selectedCountry !== "Canada") && (
               <input
                 id="stateProvince"
-                name="state_province" // Ensure name matches DB column
+                name="state_province"
                 type="text"
                 value={stateProvince}
                 onChange={(e) => setStateProvince(e.target.value)}
                 className={glassInputFieldClasses}
-                placeholder="Region / State / Province"
+                placeholder="Province / Region"
               />
             )}
           </div>
@@ -236,23 +369,38 @@ const MainInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Pr
             <label htmlFor="zipPostalCode" className={glassInputLabelClasses}>{getZipPostalLabel()}</label>
             <input
               id="zipPostalCode"
-              name="zip_postal_code" // Ensure name matches DB column
+              name="zip_postal_code"
               type="text"
               value={zipPostalCode}
               onChange={(e) => setZipPostalCode(e.target.value)}
               className={glassInputFieldClasses}
+              placeholder={selectedCountry === "United States" ? "e.g., 12345" : "Postal / Zip Code"}
             />
           </div>
         </div>
       </div>
       
-      <button type="submit" className="w-full px-5 py-3 text-base font-medium bg-indigo-500/30 dark:bg-indigo-600/30 backdrop-blur-md border border-indigo-300/40 dark:border-indigo-500/30 text-indigo-900 dark:text-white rounded-lg shadow-lg hover:bg-indigo-500/50 dark:hover:bg-indigo-600/50 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none mt-6 cursor-pointer">Save Main Info</button>
+      <button 
+        type="submit" 
+        disabled={isSaving}
+        className="w-full px-5 py-3 text-base font-medium bg-indigo-500/30 dark:bg-indigo-600/30 backdrop-blur-md border border-indigo-300/40 dark:border-indigo-500/30 text-indigo-900 dark:text-white rounded-lg shadow-lg hover:bg-indigo-500/50 dark:hover:bg-indigo-600/50 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none mt-6 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+      >
+        {isSaving ? (
+          <span className="flex items-center justify-center">
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-900 dark:text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Saving...
+          </span>
+        ) : 'Save Main Info'}
+      </button>
     </form>
   );
 };
 
 // --- Files Tab Placeholder --- (Renamed from AttachmentsTab)
-const FilesTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: (formData: FormData) => Promise<void | never> }) => {
+const FilesTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: (formData: FormData) => Promise<{ success: boolean, error?: string } | void> }) => {
   const supabase = createClient(); 
   const bucketName = 'user_files';
 
@@ -268,19 +416,59 @@ const FilesTab = ({ user, profile, updateProfile }: { user: User, profile: Profi
   // Handler for checkbox change
   const handleCheckboxChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const isChecked = event.target.checked;
+    
+    // Check rate limiter before proceeding
+    const rateLimit = profileSaveRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many save attempts. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
     setForceExactResume(isChecked);
 
     startTransition(async () => {
       const formData = new FormData();
       formData.append('force_exact_resume', isChecked.toString());
       try {
-        await updateProfile(formData);
-        // Optionally show a temporary success indicator, though redirect message is primary
+        const result = await updateProfile(formData);
+        
+        if (!result || result.success) {
+          toast.success('Resume preference saved', {
+            duration: 10000,
+            position: 'bottom-right',
+            style: {
+              background: '#D1FAE5',
+              color: '#065F46',
+              borderRadius: '10px',
+              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            },
+          });
+        } else {
+          throw new Error(result.error || 'Unknown error');
+        }
       } catch (error) {
         console.error("Error updating force_exact_resume:", error);
-        // Revert state on error?
+        // Revert state on error
         setForceExactResume(!isChecked); 
-        alert("Failed to save resume preference.");
+        toast.error('Failed to save resume preference', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#FEE2E2',
+            color: '#991B1B',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
       }
     });
   };
@@ -288,6 +476,23 @@ const FilesTab = ({ user, profile, updateProfile }: { user: User, profile: Profi
   // Callback function when upload succeeds
   const handleUploadSuccess = useCallback(async (filePath: string, fileType: 'resume' | 'cover_letter') => {
     console.log(`Upload success for ${fileType}:`, filePath);
+    
+    // Check rate limiter before proceeding
+    const rateLimit = fileUploadRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many upload attempts. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
     // Create FormData to update the profile with the new file path
     const formData = new FormData();
     formData.append(fileType === 'resume' ? 'resume_url' : 'cover_letter_url', filePath);
@@ -296,15 +501,37 @@ const FilesTab = ({ user, profile, updateProfile }: { user: User, profile: Profi
 
     try {
       // Call the existing updateProfile action to save the path to the database
-      await updateProfile(formData);
-      // Optionally show a success message here or rely on page redirect message
-      alert(`${fileType === 'resume' ? 'Resume' : 'Cover Letter'} path saved successfully!`); 
-      // TODO: Force re-fetch or update local profile state to show new link immediately if needed
+      const result = await updateProfile(formData);
+      
+      // Show success toast
+      if (!result || result.success) {
+        toast.success(`${fileType === 'resume' ? 'Resume' : 'Cover Letter'} uploaded successfully!`, {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#D1FAE5',
+            color: '#065F46',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      } else {
+        throw new Error(result.error || 'Unknown error');
+      }
     } catch (error) {
       console.error('Error updating profile after upload:', error);
-      alert(`Failed to save ${fileType === 'resume' ? 'Resume' : 'Cover Letter'} path.`);
+      toast.error(`Failed to save ${fileType === 'resume' ? 'Resume' : 'Cover Letter'}`, {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
     }
-  }, [updateProfile, user.id]); // Include dependencies
+  }, [updateProfile]);
 
   // Callback function when delete succeeds (passed to FileUploader)
   const handleDeleteSuccess = useCallback((fileType: 'resume' | 'cover_letter') => {
@@ -998,6 +1225,23 @@ const SkillsTab = ({ user }: { user: User }) => {
   // Handle add/update skill
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check rate limiter before proceeding
+    const rateLimit = skillsRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many skill operations. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
     const supabase = createClient();
 
     try {
@@ -1044,6 +1288,22 @@ const SkillsTab = ({ user }: { user: User }) => {
   // Handle delete
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this skill?')) {
+      return;
+    }
+
+    // Check rate limiter before proceeding
+    const rateLimit = skillsRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many skill operations. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
       return;
     }
 
@@ -1509,7 +1769,7 @@ const ReferencesTab = ({ user }: { user: User }) => {
 };
 
 // --- Additional Info Tab Component ---
-const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: any }) => {
+const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profile: Profile | null, updateProfile: (formData: FormData) => Promise<{ success: boolean, error?: string } | void> }) => {
   // State for controlled components
   const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedin_url || '');
   const [githubUrl, setGithubUrl] = useState(profile?.github_url || '');
@@ -1521,6 +1781,9 @@ const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profi
   const [preferredLocation, setPreferredLocation] = useState(profile?.preferred_location || '');
   const [willingToRelocate, setWillingToRelocate] = useState(profile?.willing_to_relocate || false);
   const [additionalInfo, setAdditionalInfo] = useState(profile?.additional_info || '');
+  
+  // State for loading/saving status
+  const [isSaving, setIsSaving] = useState(false);
 
   // Currency options
   const currencyOptions = [
@@ -1556,6 +1819,25 @@ const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profi
   // Custom handler for submitting the form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check rate limiter before proceeding
+    const rateLimit = profileSaveRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many save attempts. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
+    setIsSaving(true);
+    
     const formData = new FormData();
 
     // Add all fields to the form data
@@ -1571,9 +1853,36 @@ const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profi
     formData.append('additionalInfo', additionalInfo);
 
     try {
-      await updateProfile(formData);
+      const result = await updateProfile(formData);
+      
+      if (!result || result.success) {
+        toast.success('Additional information updated successfully', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#D1FAE5',
+            color: '#065F46',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      } else {
+        throw new Error(result.error || 'Unknown error');
+      }
     } catch (error) {
       console.error('Error updating additional information:', error);
+      toast.error('Failed to update additional information', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1737,8 +2046,344 @@ const AdditionalInfoTab = ({ user, profile, updateProfile }: { user: User, profi
         </div>
       </div>
       
-      <button type="submit" className="w-full px-5 py-3 text-base font-medium bg-indigo-500/30 dark:bg-indigo-600/30 backdrop-blur-md border border-indigo-300/40 dark:border-indigo-500/30 text-indigo-900 dark:text-white rounded-lg shadow-lg hover:bg-indigo-500/50 dark:hover:bg-indigo-600/50 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none mt-6 cursor-pointer">Save Additional Info</button>
+      <button 
+        type="submit" 
+        disabled={isSaving}
+        className="w-full px-5 py-3 text-base font-medium bg-indigo-500/30 dark:bg-indigo-600/30 backdrop-blur-md border border-indigo-300/40 dark:border-indigo-500/30 text-indigo-900 dark:text-white rounded-lg shadow-lg hover:bg-indigo-500/50 dark:hover:bg-indigo-600/50 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none mt-6 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+      >
+        {isSaving ? (
+          <span className="flex items-center justify-center">
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-900 dark:text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Saving...
+          </span>
+        ) : 'Save Additional Info'}
+      </button>
     </form>
+  );
+};
+
+// --- Language Tab Component ---
+const LanguagesTab = ({ user }: { user: User }) => {
+  const [languagesList, setLanguagesList] = useState<any[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [isDeleting, startDeleteTransition] = useTransition();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Form state
+  const [languageName, setLanguageName] = useState('');
+  const [proficiency, setProficiency] = useState('');
+
+  // Proficiency options
+  const proficiencyOptions = [
+    'Beginner',
+    'Intermediate',
+    'Advanced',
+    'Fluent',
+    'Native'
+  ];
+
+  // Fetch languages data
+  useEffect(() => {
+    const fetchLanguages = async () => {
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from('languages')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('language_name', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching languages:', error);
+          return;
+        }
+
+        setLanguagesList(data || []);
+      } catch (error) {
+        console.error('Error in fetch operation:', error);
+      }
+    };
+
+    fetchLanguages();
+  }, [user.id]);
+
+  // Handle edit click
+  const handleEditClick = (language: any) => {
+    setEditingId(language.id);
+    setLanguageName(language.language_name || '');
+    setProficiency(language.proficiency || '');
+    setShowAddForm(true);
+  };
+
+  // Reset form
+  const resetForm = () => {
+    setEditingId(null);
+    setLanguageName('');
+    setProficiency('');
+    setShowAddForm(false);
+  };
+
+  // Handle add/update language
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Check rate limiter before proceeding
+    const rateLimit = languagesRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many language operations. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+    
+    const supabase = createClient();
+
+    try {
+      const languageData = {
+        user_id: user.id,
+        language_name: languageName,
+        proficiency
+      };
+
+      let result;
+
+      if (editingId) {
+        // Update existing entry
+        result = await supabase
+          .from('languages')
+          .update(languageData)
+          .eq('id', editingId);
+      } else {
+        // Add new entry
+        result = await supabase
+          .from('languages')
+          .insert([languageData]);
+      }
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      // Refresh the data
+      const { data } = await supabase
+        .from('languages')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('language_name', { ascending: true });
+
+      setLanguagesList(data || []);
+      resetForm();
+      
+      // Show success toast
+      toast.success('Language saved successfully', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#D1FAE5',
+          color: '#065F46',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+    } catch (error: any) {
+      console.error('Error saving language:', error.message);
+      toast.error(`Error saving language: ${error.message}`, {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+    }
+  };
+
+  // Handle delete
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this language?')) {
+      return;
+    }
+
+    // Check rate limiter before proceeding
+    const rateLimit = languagesRateLimiter.checkAndRecord();
+    if (!rateLimit.allowed) {
+      toast.error(rateLimit.reason || 'Too many language operations. Please try again later.', {
+        duration: 10000,
+        position: 'bottom-right',
+        style: {
+          background: '#FEE2E2',
+          color: '#991B1B',
+          borderRadius: '10px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        },
+      });
+      return;
+    }
+
+    const supabase = createClient();
+    setDeleteError(null);
+
+    startDeleteTransition(async () => {
+      const { error } = await supabase
+        .from('languages')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        setDeleteError(error.message);
+        toast.error(`Error deleting language: ${error.message}`, {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#FEE2E2',
+            color: '#991B1B',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      } else {
+        // Update the list
+        setLanguagesList(prev => prev.filter(language => language.id !== id));
+        if (editingId === id) {
+          resetForm();
+        }
+        
+        // Show success toast
+        toast.success('Language deleted successfully', {
+          duration: 10000,
+          position: 'bottom-right',
+          style: {
+            background: '#D1FAE5',
+            color: '#065F46',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          },
+        });
+      }
+    });
+  };
+
+  return (
+    <div className="mt-6 p-6 bg-blue-50/50 dark:bg-indigo-950/70 backdrop-blur-lg rounded-xl border border-blue-200/40 dark:border-indigo-800/50 shadow-xl space-y-6">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Languages</h3>
+        {!showAddForm && (
+          <button 
+            onClick={() => setShowAddForm(true)} 
+            className="px-4 py-2 text-sm font-medium bg-white/10 dark:bg-black/20 backdrop-blur-md border border-white/20 dark:border-white/10 text-gray-800 dark:text-white rounded-lg shadow-lg hover:bg-white/30 dark:hover:bg-black/40 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none cursor-pointer"
+          >
+            + Add Language
+          </button>
+        )}
+      </div>
+
+      {/* Add/Edit Language Form */}
+      {showAddForm && (
+        <form 
+          onSubmit={handleSubmit}
+          className="p-6 border border-blue-100/30 dark:border-indigo-700/40 bg-blue-50/30 dark:bg-indigo-900/40 backdrop-blur-sm rounded-lg space-y-4 mb-6 shadow-inner"
+        >
+          <h4 className="text-md font-semibold text-gray-800 dark:text-gray-100 mb-3">
+            {editingId ? 'Edit Language' : 'Add New Language'}
+          </h4>
+
+          <div>
+            <label htmlFor="languageName" className={glassInputLabelClasses}>Language Name</label>
+            <input 
+              id="languageName" 
+              type="text" 
+              value={languageName}
+              onChange={(e) => setLanguageName(e.target.value)}
+              className={glassInputFieldClasses}
+              placeholder="e.g., English, Spanish, Mandarin, etc."
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="proficiency" className={glassInputLabelClasses}>Proficiency Level</label>
+            <select 
+              id="proficiency" 
+              value={proficiency}
+              onChange={(e) => setProficiency(e.target.value)}
+              className={glassInputFieldClasses}
+            >
+              <option value="">Select Proficiency Level</option>
+              {proficiencyOptions.map(opt => (
+                <option key={opt} value={opt} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-2">
+            <button 
+              type="button" 
+              onClick={resetForm}
+              className="px-4 py-2 text-sm font-medium bg-white/10 dark:bg-black/20 backdrop-blur-md border border-white/20 dark:border-white/10 text-gray-800 dark:text-white rounded-lg shadow-lg hover:bg-white/30 dark:hover:bg-black/40 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit"
+              className="px-4 py-2 text-sm font-medium bg-indigo-500/30 dark:bg-indigo-600/30 backdrop-blur-md border border-indigo-300/40 dark:border-indigo-500/30 text-indigo-900 dark:text-white rounded-lg shadow-lg hover:bg-indigo-500/50 dark:hover:bg-indigo-600/50 hover:shadow-xl transition-all duration-300 ease-in-out focus:ring-2 focus:ring-indigo-500/50 focus:outline-none cursor-pointer"
+            >
+              {editingId ? 'Update Language' : 'Add Language'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Languages Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        {languagesList.length === 0 && !showAddForm && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 col-span-3">No languages added yet.</p>
+        )}
+
+        {languagesList.map(language => (
+          <div key={language.id} className="p-4 border border-blue-100/30 dark:border-indigo-800/40 bg-blue-50/20 dark:bg-indigo-900/30 backdrop-blur-sm rounded-lg shadow-md">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="font-semibold text-gray-800 dark:text-gray-100">{language.language_name}</p>
+                {language.proficiency && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{language.proficiency}</p>
+                )}
+              </div>
+              <div className="flex space-x-2">
+                <button 
+                  onClick={() => handleEditClick(language)}
+                  disabled={isDeleting}
+                  className="p-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 focus:outline-none cursor-pointer"
+                >
+                  Edit
+                </button>
+                <button 
+                  onClick={() => handleDelete(language.id)}
+                  disabled={isDeleting}
+                  className="p-1 text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 focus:outline-none cursor-pointer"
+                >
+                  {isDeleting ? '...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -1746,7 +2391,7 @@ interface AccountTabsProps {
   user: User
   profile: Profile | null
   education: Education[]
-  updateProfile: (formData: FormData) => Promise<void | never>;
+  updateProfile: (formData: FormData) => Promise<{ success: boolean, error?: string } | void>;
   signOut: () => Promise<never>;
 }
 
@@ -1772,7 +2417,10 @@ export default function AccountTabs({
 
   return (
     // Removed max-w-4xl and mx-auto as it's handled by the parent page container
-    <div className="w-full p-4 md:p-6 lg:p-8 rounded-lg"> 
+    <div className="w-full p-4 md:p-6 lg:p-8 rounded-lg">
+      {/* Toast container - moved to root level */}
+      <Toaster />
+      
       {/* Tab Navigation */}
       <div className="mb-6"> {/* Removed border-b, handled by tabs */}
         <nav className="flex space-x-2" aria-label="Tabs"> {/* Reduced space */}
@@ -1792,6 +2440,9 @@ export default function AccountTabs({
           <button onClick={() => setActiveTab('skills')} className={`${tabClasses('skills')} cursor-pointer`}>
             Skills
           </button>
+          <button onClick={() => setActiveTab('languages')} className={`${tabClasses('languages')} cursor-pointer`}>
+            Languages
+          </button>
           <button onClick={() => setActiveTab('references')} className={`${tabClasses('references')} cursor-pointer`}>
             References
           </button>
@@ -1808,10 +2459,10 @@ export default function AccountTabs({
         {activeTab === 'education' && <EducationTab user={user} education={education} />}
         {activeTab === 'experience' && <WorkExperienceTab user={user} />}
         {activeTab === 'skills' && <SkillsTab user={user} />}
+        {activeTab === 'languages' && <LanguagesTab user={user} />}
         {activeTab === 'references' && <ReferencesTab user={user} />}
         {activeTab === 'additional' && <AdditionalInfoTab user={user} profile={profile} updateProfile={updateProfile} />}
       </div>
-
     </div>
   );
 } 

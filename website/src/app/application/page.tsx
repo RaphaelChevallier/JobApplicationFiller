@@ -32,10 +32,6 @@ export default async function AIApplicationPage({ searchParams }: {
     .eq('user_id', user.id)
     .order('end_date', { ascending: false })
 
-  // Read searchParams into local variables - properly handle as dynamic values
-  const message = searchParams?.message || null;
-  const errorMessage = searchParams?.error || null;
-
   // Handle profile fetch errors
   if (profileError && profileError.code !== 'PGRST116') {
     console.error('Error fetching profile:', profileError)
@@ -72,18 +68,6 @@ export default async function AIApplicationPage({ searchParams }: {
             </form>
           </div>
         </div>
-
-        {/* Display Success/Error Messages using local variables */}
-        {message && (
-          <div className="p-3 mb-4 text-sm text-green-700 bg-green-100 rounded-lg dark:bg-green-200 dark:text-green-800" role="alert">
-            {message}
-          </div>
-        )}
-        {errorMessage && (
-          <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">
-            {errorMessage}
-          </div>
-        )}
 
         {/* Tab Component - Allow this to grow */}
         <div className="flex-grow">
