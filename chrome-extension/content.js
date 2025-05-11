@@ -140,15 +140,10 @@ function displayDetectionPopup() {
 
                 // Add click listeners
                 loginButton.addEventListener('click', () => {
-                    console.log('Login button clicked. Sending INITIATE_LOGIN.');
-                    chrome.runtime.sendMessage({ type: 'INITIATE_LOGIN' }, (loginResponse) => {
-                        if (chrome.runtime.lastError) {
-                            console.error('Error sending INITIATE_LOGIN message:', chrome.runtime.lastError.message);
-                        } else {
-                            console.log('INITIATE_LOGIN response:', loginResponse); 
-                        }
-                    });
-                    removePopup(); // Remove popup after initiating login
+                    console.log('Login button clicked. Opening extension popup for login.');
+                    // Instead of redirecting to website, open the extension popup for login
+                    chrome.runtime.sendMessage({ type: 'OPEN_POPUP_FOR_LOGIN' });
+                    removePopup(); // Remove the content popup
                 });
 
                 cancelButton_loggedOut.addEventListener('click', () => {
@@ -281,6 +276,149 @@ async function checkJobApplicationPage() {
 
     return { isJobPage: isJobPage, method: method };
 }
+
+// Function to fill form fields based on user profile data
+async function fillFormFields(profile) {
+    console.log("Starting to fill form fields with profile data:", profile);
+    
+    // Safety function to access profile properties
+    const getProfileValue = (key) => {
+        try {
+            return profile[key] || '';
+        } catch (e) {
+            console.warn(`Error accessing profile.${key}:`, e);
+            return '';
+        }
+    };
+    
+    // Get the first and last name with fallbacks
+    const firstName = getProfileValue('first_name');
+    const lastName = getProfileValue('last_name');
+    const fullName = firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || '';
+    
+    // Map of common field identifiers to profile data
+    const fieldMappings = {
+        // Basic Info
+        'first_name': firstName,
+        'last_name': lastName,
+        'name': fullName,
+        'full_name': fullName,
+        'email': getProfileValue('email'),
+        'phone': getProfileValue('phone'),
+        
+        // Address (structured fields)
+        'address': getProfileValue('full_address'), // Generated full address field
+        'street_address': getProfileValue('street_address'),
+        'address_line_1': getProfileValue('street_address'),
+        'address_line_2': getProfileValue('address_line_2'),
+        'city': getProfileValue('city'),
+        'state': getProfileValue('state_province'), 
+        'province': getProfileValue('state_province'),
+        'state_province': getProfileValue('state_province'),
+        'zip': getProfileValue('zip_postal_code'),
+        'postal_code': getProfileValue('zip_postal_code'),
+        'zip_code': getProfileValue('zip_postal_code'),
+        'country': getProfileValue('country') || 'United States',
+        
+        // Social profiles
+        'linkedin': getProfileValue('linkedin_url'),
+        'github': getProfileValue('github_url'),
+        'portfolio': getProfileValue('portfolio_url'),
+        'website': getProfileValue('website_url'),
+        
+        // Additional fields
+        'desired_salary': getProfileValue('desired_salary'),
+        'work_authorization': getProfileValue('work_authorization'),
+        'preferred_location': getProfileValue('preferred_location')
+    };
+    
+    // Find and fill input fields
+    const inputs = document.querySelectorAll('input, textarea, select');
+    let filledCount = 0;
+    
+    inputs.forEach(input => {
+        const name = input.getAttribute('name')?.toLowerCase() || '';
+        const id = input.getAttribute('id')?.toLowerCase() || '';
+        const placeholder = input.getAttribute('placeholder')?.toLowerCase() || '';
+        const ariaLabel = input.getAttribute('aria-label')?.toLowerCase() || '';
+        const labelText = input.labels ? Array.from(input.labels).map(l => l.textContent.toLowerCase()).join(' ') : '';
+        const type = input.getAttribute('type')?.toLowerCase() || '';
+        
+        // Check input fields against our mapping
+        for (const [fieldKey, fieldValue] of Object.entries(fieldMappings)) {
+            if (!fieldValue) continue; // Skip empty values
+            
+            const shouldFill = 
+                name.includes(fieldKey) || 
+                id.includes(fieldKey) || 
+                placeholder.includes(fieldKey) || 
+                ariaLabel.includes(fieldKey) || 
+                labelText.includes(fieldKey);
+                
+            if (shouldFill) {
+                // Handle checkboxes and radio buttons differently
+                if (type === 'checkbox' || type === 'radio') {
+                    // Only handle boolean fields like willing_to_relocate
+                    if (fieldKey === 'willing_to_relocate' && fieldValue === true) {
+                        input.checked = true;
+                    }
+                } else {
+                    // For text fields, assign the value
+                    input.value = fieldValue;
+                    // Trigger change event to notify the form
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    filledCount++;
+                    console.log(`Filled ${fieldKey} with "${fieldValue}"`);
+                }
+                
+                // Break after finding the first match for this input
+                break;
+            }
+        }
+    });
+    
+    console.log(`Filled ${filledCount} fields on the page`);
+    return filledCount;
+}
+
+// Setup message listener for form filling
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'START_FILLING') {
+        console.log("Received START_FILLING message in content script");
+        
+        // Request user profile data from service worker
+        chrome.runtime.sendMessage({ type: 'GET_PROFILE_DATA' }, async (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("Error getting profile data:", chrome.runtime.lastError.message);
+                sendResponse({ status: "Error: Could not get profile data" });
+                return;
+            }
+            
+            if (!response || !response.profile) {
+                console.error("Invalid profile data received:", response);
+                sendResponse({ status: "Error: Invalid profile data" });
+                return;
+            }
+            
+            try {
+                const filledCount = await fillFormFields(response.profile);
+                sendResponse({ 
+                    status: `Success: Filled ${filledCount} fields on the page`,
+                    filledCount: filledCount
+                });
+            } catch (error) {
+                console.error("Error filling form:", error);
+                sendResponse({ 
+                    status: `Error filling form: ${error.message}`,
+                    error: error.message
+                });
+            }
+        });
+        
+        return true; // Keep the message channel open for async response
+    }
+});
 
 // Check and send message with detection details
 (async () => { 

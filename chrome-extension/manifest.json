@@ -22,7 +22,8 @@
     "storage",
     "scripting",
     "activeTab",
-    "action"
+    "action",
+    "identity"
   ],
   "content_scripts": [
     {
@@ -35,9 +36,10 @@
     "service_worker": "dist/service-worker-bundle.js",
     "type": "module"
   },
-  "externally_connectable": {
-    "matches": [
-      "*://localhost:*/*"
-    ]
-  }
+  "web_accessible_resources": [
+    {
+      "resources": ["config.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 } 

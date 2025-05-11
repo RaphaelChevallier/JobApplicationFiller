@@ -1,15 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 import { chromeStorageAdapter } from './storage-adapter' // Import the custom adapter
+import env from './config.js'; // Import config
 
 console.log("Job Application Filler: Service Worker loaded.");
 
-// !! IMPORTANT: Use your actual Supabase credentials !!
-const SUPABASE_URL = 'https://qculzyrifhqowlmgihqw.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjdWx6eXJpZmhxb3dsbWdpaHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU2OTAxMTYsImV4cCI6MjA2MTI2NjExNn0.nyNnMX8YslNB2EUFK9GrNiSDHr2l76lS2RQu0RpD11k';
+// Use Supabase credentials from config
+const SUPABASE_URL = env.supabaseUrl;
+const SUPABASE_ANON_KEY = env.supabaseAnonKey;
 
-const LOGIN_URL = process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:3000/login' 
-    : 'YOUR_PRODUCTION_WEBSITE_URL/login'; // <-- REPLACE with production URL later
+// Use login URL from config
+const LOGIN_URL = env.loginUrl;
 
 // Track job page status per tab
 const tabJobPageStatus = {};
@@ -75,34 +75,52 @@ function updateActionState(tabId, isJobPage) {
 
 // Function to fetch profile and store popup setting
 async function updateUserPreferenceStorage(userId) {
-    if (!supabase || !userId) {
-        // Clear setting if no user or supabase client
-        await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY);
-        console.log("Cleared popup preference from storage (no user/client).");
+    if (!supabase) {
+        console.error("Supabase client not initialized, cannot update user preferences");
         return;
     }
+    
     try {
-        console.log(`Fetching profile for user ${userId} to store popup preference...`);
-        const { data: profile, error: profileError } = await supabase
+        // Fetch profile using ID as key (not user_id)
+        const { data: profile, error } = await supabase
             .from('profiles')
-            .select('show_detection_popup') // Only select the needed field
-            .eq('user_id', userId)
-            .maybeSingle(); // Use maybeSingle to handle no profile case gracefully
-
-        if (profileError) {
-            console.error("Error fetching profile for preference storage:", profileError);
-            await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY); // Clear on error
-            console.log("Cleared popup preference from storage (profile fetch error).");
-        } else {
-            // Store the preference (true if profile exists and is true, false otherwise)
-            const shouldShowPopup = !!profile?.show_detection_popup; 
-            await chrome.storage.local.set({ [SHOW_POPUP_SETTING_KEY]: shouldShowPopup });
-            console.log(`Stored popup preference in storage: ${shouldShowPopup}`);
+            .select('*')
+            .eq('id', userId)  // Use 'id' NOT 'user_id' - id is the primary key in the profiles table
+            .single();
+        
+        if (error) {
+            console.error("Error fetching profile:", error.message);
+            return;
         }
-    } catch(e) {
-         console.error("Exception fetching/storing preference:", e);
-         await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY);
-         console.log("Cleared popup preference from storage (exception).");
+        
+        // Always set a default value of true, regardless of if profile exists or has the column
+        let showPopup = true;
+        
+        // Store show_popup preference only if profile exists
+        if (profile) {
+            try {
+                // Use a safety check that specifically handles if the column doesn't exist
+                if ('show_popup' in profile) {
+                    showPopup = profile.show_popup ?? true;
+                } else {
+                    console.log("Column 'show_popup' not found in profile, using default value");
+                }
+            } catch (columnError) {
+                console.error("Error accessing column:", columnError);
+                // Continue with default value
+            }
+            
+            console.log("Setting popup preference:", showPopup);
+        } else {
+            console.log("No profile found for user:", userId);
+        }
+        
+        // Set the value in storage
+        await chrome.storage.local.set({
+            [SHOW_POPUP_SETTING_KEY]: showPopup
+        });
+    } catch (e) {
+        console.error("Error in updateUserPreferenceStorage:", e);
     }
 }
 
@@ -127,23 +145,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'GET_POPUP_DATA') {
     handleGetPopupData(sender, sendResponse);
     return true; // Indicate asynchronous response
-  } else if (message.type === 'INITIATE_LOGIN') {
-    console.log("Login initiated.");
-    chrome.tabs.create({ url: LOGIN_URL });
-    sendResponse({ success: true, message: "Login page opened." }); 
+  } else if (message.type === 'GET_PROFILE_DATA') {
+    handleGetProfileData(sender, sendResponse);
+    return true; // Indicate asynchronous response
+  } else if (message.type === 'GET_SESSION_TOKEN') {
+    handleGetSessionToken(sendResponse);
+    return true; // Indicate asynchronous response
+  } else if (message.type === 'LOGIN_WITH_CREDENTIALS') {
+    handleCredentialLogin(message, sendResponse);
+    return true; // Indicate asynchronous response
+  } else if (message.type === 'LOGIN_WITH_GOOGLE') {
+    handleGoogleLogin(sendResponse);
+    return true; // Indicate asynchronous response
+  } else if (message.type === 'SIGN_OUT') {
+    handleSignOut(sendResponse);
+    return true; // Indicate asynchronous response
   } else if (message.type === 'START_FILLING') {
       const tabId = sender.tab?.id;
       console.log(`Received START_FILLING request from tab ${tabId}.`);
       if (tabId) {
-          // TODO: Implement the actual form filling logic here
-          // This might involve sending another message back to the content script
-          // or using chrome.scripting.executeScript
-          console.log(`Placeholder: Would start filling form on tab ${tabId}`);
-          sendResponse({success: true, message: "Filling process initiated (placeholder)."});
+          // Forward the message to the content script in the tab
+          chrome.tabs.sendMessage(tabId, { type: 'START_FILLING' }, (response) => {
+              if (chrome.runtime.lastError) {
+                  console.error(`Error sending START_FILLING to tab ${tabId}:`, chrome.runtime.lastError.message);
+                  sendResponse({success: false, error: chrome.runtime.lastError.message});
+              } else {
+                  console.log(`START_FILLING response from tab ${tabId}:`, response);
+                  sendResponse({success: true, ...response});
+              }
+          });
+          return true; // Keep message channel open for async response
       } else {
           console.warn("Received START_FILLING without tab ID.");
           sendResponse({success: false, error: "Missing tab ID"});
       }
+  } else if (message.type === 'OPEN_POPUP_FOR_LOGIN') {
+      // Open the extension popup UI for login
+      console.log("Opening extension popup for login");
+      if (sender.tab?.id) {
+          try {
+              // Open the popup UI programmatically
+              chrome.action.openPopup();
+              sendResponse({ success: true });
+          } catch (error) {
+              console.error("Error opening popup:", error);
+              // If we can't open the popup directly, we can try to show an icon hint instead
+              chrome.action.setPopup({ tabId: sender.tab.id, popup: "popup.html" });
+              // Add a badge to draw attention
+              chrome.action.setBadgeText({ tabId: sender.tab.id, text: "Login" });
+              chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: "#FF0000" });
+              sendResponse({ success: false, error: "Could not open popup directly. Please click the extension icon to login." });
+          }
+      } else {
+          sendResponse({ success: false, error: "No tab information" });
+      }
+      return true;
   } else if (message.type === 'CHECK_AUTH_STATUS') {
       console.log("Checking authentication status...");
       if (!supabase) {
@@ -175,43 +231,123 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-chrome.runtime.onMessageExternal.addListener(async (message, sender, sendResponse) => {
-  console.log("External message received from", sender.origin, ":", message);
-  if (message.type === 'SESSION_DATA' && message.payload) {
-    console.log("Received session data from website.");
-    if (supabase) {
-      try {
-        const { data: { session }, error } = await supabase.auth.setSession(message.payload);
-        if (error) {
-          console.error("Error setting session:", error);
-          await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY); // Clear pref on error
-          sendResponse({ success: false, error: error.message });
-        } else {
-          console.log("Session successfully set in extension.");
-          // Fetch profile and store preference *after* session is set
-          if (session?.user?.id) {
-             await updateUserPreferenceStorage(session.user.id);
-          } else {
-              // No user in session, clear storage
-              await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY);
-              console.log("Cleared popup preference from storage (no user in session).");
-          }
-          sendResponse({ success: true });
-        }
-      } catch (e) {
-        console.error("Exception setting session:", e);
-        await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY); // Clear pref on error
-        sendResponse({ success: false, error: 'Exception setting session' });
-      }
-    } else {
-      console.error("Supabase client not ready.");
-      sendResponse({ success: false, error: 'Supabase client not ready' });
+// Handler for email/password login
+async function handleCredentialLogin(message, sendResponse) {
+    if (!supabase) {
+        sendResponse({ error: "Supabase client not initialized" });
+        return;
     }
-    return true; // Indicate async response
-  }
-  // Allow other external messages if needed in the future
-  // sendResponse({ success: false, error: 'Unknown external message type' });
-});
+
+    const { email, password } = message;
+    
+    if (!email || !password) {
+        sendResponse({ error: "Email and password are required" });
+        return;
+    }
+    
+    try {
+        console.log(`Attempting login with email: ${email}`);
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+        
+        if (error) {
+            console.error("Login error:", error);
+            sendResponse({ error: error.message });
+            return;
+        }
+        
+        if (data?.user) {
+            console.log("Login successful for user:", data.user.id);
+            
+            // Update user preferences after successful login
+            await updateUserPreferenceStorage(data.user.id);
+            
+            sendResponse({ success: true });
+        } else {
+            sendResponse({ error: "Login failed" });
+        }
+    } catch (e) {
+        console.error("Exception during login:", e);
+        sendResponse({ error: "An unexpected error occurred" });
+    }
+}
+
+// Handler for Google OAuth login
+async function handleGoogleLogin(sendResponse) {
+    if (!supabase) {
+        sendResponse({ error: "Supabase client not initialized" });
+        return;
+    }
+    
+    try {
+        console.log("Initiating Google OAuth flow");
+        
+        // Generate the OAuth URL but don't redirect automatically
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: chrome.identity.getRedirectURL()
+            }
+        });
+        
+        if (error) {
+            console.error("Google OAuth error:", error);
+            sendResponse({ error: error.message });
+            return;
+        }
+        
+        if (data?.url) {
+            console.log("Google auth URL generated:", data.url);
+            sendResponse({ authUrl: data.url });
+        } else {
+            sendResponse({ error: "Failed to generate authentication URL" });
+        }
+    } catch (e) {
+        console.error("Exception during Google login:", e);
+        sendResponse({ error: "An unexpected error occurred" });
+    }
+}
+
+// Handler for sign out
+async function handleSignOut(sendResponse) {
+    if (!supabase) {
+        console.error("Supabase not initialized, cannot sign out.");
+        sendResponse({ success: false, error: "Supabase not ready" });
+        return;
+    }
+    
+    try {
+        console.log("Signing user out...");
+        const { error } = await supabase.auth.signOut();
+
+        if (error) {
+            console.error("Error signing out:", error);
+            sendResponse({ success: false, error: error.message });
+            return;
+        }
+        
+        console.log("User signed out successfully");
+        
+        // Clear any user-specific data in storage
+        try {
+            await chrome.storage.local.remove(SHOW_POPUP_SETTING_KEY);
+            console.log("Cleared user preferences from storage");
+        } catch (storageError) {
+            console.warn("Failed to clear user preferences:", storageError);
+            // Non-critical error, continue with sign out
+        }
+        
+        sendResponse({ success: true });
+    } catch (error) {
+        console.error("Exception during sign out:", error);
+        sendResponse({ 
+            success: false, 
+            error: "Error signing out: " + error.message
+        });
+    }
+}
 
 // --- Core Logic --- 
 
@@ -256,16 +392,36 @@ async function handleGetPopupData(sender, sendResponse) {
                 const { data: profile, error: profileError } = await supabase
                     .from('profiles')
                     .select('*') // Select all for popup display
-                    .eq('user_id', session.user.id) // Use 'user_id' from the profile table schema
+                    .eq('id', session.user.id) // Changed from user_id to id to match new structure
                     .single(); // Assumes one profile per user ID
 
                 if (profileError) {
                     console.error("Error fetching profile for popup:", profileError);
                     // Profile fetch failed, but user is logged in
                     profileData = null; 
-                } else {
+                } else if (profile) {
                     console.log("Profile fetched for popup:", profile);
-                    profileData = profile;
+                    
+                    // Make a safe copy of the profile with only the fields we need
+                    // This prevents errors from trying to access non-existent columns
+                    profileData = {
+                        id: profile.id,
+                        first_name: profile.first_name || '',
+                        last_name: profile.last_name || '',
+                        email: session.user.email // Add email from session
+                    };
+                    
+                    // Only add other fields if they exist
+                    const optionalFields = [
+                        'phone', 'street_address', 'address_line_2', 'city', 
+                        'state_province', 'zip_postal_code', 'country'
+                    ];
+                    
+                    for (const field of optionalFields) {
+                        if (field in profile) {
+                            profileData[field] = profile[field];
+                        }
+                    }
                 }
             } catch(e) {
                 console.error("Exception fetching profile:", e);
@@ -293,6 +449,104 @@ async function handleGetPopupData(sender, sendResponse) {
             profile: null, 
             isJobPage: false, 
             error: "Error getting active tab: " + error.message
+        });
+    }
+}
+
+// Handler for GET_PROFILE_DATA requests
+async function handleGetProfileData(sender, sendResponse) {
+    if (!supabase) {
+        console.error("Supabase not initialized, cannot get profile data.");
+        sendResponse({ success: false, error: "Supabase not ready" });
+        return;
+    }
+    
+    try {
+        console.log("Getting session for profile data...");
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+        if (sessionError) {
+            console.error("Error getting session for profile data:", sessionError);
+            sendResponse({ success: false, error: "Session error" });
+            return;
+        }
+
+        if (!session) {
+            console.log("User not logged in, cannot fetch profile data.");
+            sendResponse({ success: false, error: "Not logged in" });
+            return;
+        }
+        
+        console.log("User logged in. Fetching profile data...");
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*') // Get all profile fields
+            .eq('id', session.user.id) // Use id instead of user_id
+            .single();
+
+        if (profileError) {
+            console.error("Error fetching profile data:", profileError);
+            sendResponse({ success: false, error: profileError.message });
+            return;
+        }
+        
+        // Make a safe copy of the profile to avoid potential issues with missing columns
+        const safeProfile = { ...profile };
+        
+        // Add email from session to profile data
+        safeProfile.email = session.user.email;
+        
+        console.log("Profile data fetched successfully:", safeProfile);
+        sendResponse({ 
+            success: true, 
+            profile: safeProfile
+        });
+    } catch (error) {
+        console.error("Exception getting profile data:", error);
+        sendResponse({ 
+            success: false, 
+            error: "Error fetching profile data: " + error.message
+        });
+    }
+}
+
+// Handler to get the current session token
+async function handleGetSessionToken(sendResponse) {
+    if (!supabase) {
+        console.error("Supabase not initialized, cannot get session token.");
+        sendResponse({ success: false, error: "Supabase not ready" });
+        return;
+    }
+    
+    try {
+        console.log("Getting session token...");
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (error) {
+            console.error("Error getting session:", error);
+            sendResponse({ success: false, error: error.message });
+            return;
+        }
+
+        if (!session) {
+            console.log("No active session found.");
+            sendResponse({ success: false, error: "No active session" });
+            return;
+        }
+        
+        // Extract the token from the session
+        const token = session.access_token;
+        console.log("Successfully retrieved session token");
+        
+        sendResponse({ 
+            success: true, 
+            token: token
+        });
+    } catch (error) {
+        console.error("Exception getting session token:", error);
+        sendResponse({ 
+            success: false, 
+            error: "Error getting session token: " + error.message
         });
     }
 }
