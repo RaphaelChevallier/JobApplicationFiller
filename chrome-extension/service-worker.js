@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { chromeStorageAdapter } from './storage-adapter' // Import the custom adapter
 import env from './config.js'; // Import config
+import { saveJobApplication, saveApplicationContent } from './types.js'; // Import job application type and save functions
 
 console.log("Job Application Filler: Service Worker loaded.");
 
@@ -225,6 +226,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
       })();
       return true; // Indicate asynchronous response is expected
+  } else if (message.type === 'CHECK_JOB_PAGE') {
+    checkJobPage(message, sender, sendResponse);
+  } else if (message.type === 'SAVE_JOB_APPLICATION') {
+    handleSaveJobApplication(message, sender, sendResponse);
+    return true; // Indicate asynchronous response
   } else {
      console.log("Unknown internal message type:", message.type);
      sendResponse({ success: false, error: "Unknown message type" }); // Good practice to respond
@@ -602,4 +608,68 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     } catch(e) {
         console.warn(`Could not reset action state for closed tab ${tabId}:`, e.message);
     }
-}); 
+});
+
+// Handler for saving job applications
+async function handleSaveJobApplication(message, sender, sendResponse) {
+  if (!supabase) {
+    sendResponse({ success: false, error: "Supabase client not initialized" });
+    return;
+  }
+
+  try {
+    const { jobApplication, applicationContent } = message;
+    
+    if (!jobApplication || !jobApplication.job_url) {
+      sendResponse({ success: false, error: "Invalid job application data" });
+      return;
+    }
+
+    // Get the tab URL if job_url is not provided
+    if (!jobApplication.job_url && sender.tab?.url) {
+      jobApplication.job_url = sender.tab.url;
+    }
+    
+    // Extract company name and job title from page title if not provided
+    if ((!jobApplication.company_name || !jobApplication.job_title) && sender.tab?.title) {
+      const titleParts = sender.tab.title.split(' - ');
+      if (titleParts.length >= 2) {
+        // Assume format is "Job Title - Company Name"
+        if (!jobApplication.job_title) {
+          jobApplication.job_title = titleParts[0].trim();
+        }
+        if (!jobApplication.company_name) {
+          jobApplication.company_name = titleParts[1].trim();
+        }
+      } else if (titleParts.length === 1) {
+        // Just use the title as job title
+        if (!jobApplication.job_title) {
+          jobApplication.job_title = sender.tab.title.trim();
+        }
+      }
+    }
+
+    // Save the job application
+    const savedJob = await saveJobApplication(supabase, jobApplication);
+    
+    // Save application content if provided
+    let savedContent = null;
+    if (applicationContent && savedJob && savedJob.id) {
+      // Save the application content with the job application ID
+      savedContent = await saveApplicationContent(supabase, savedJob.id, applicationContent);
+    }
+    
+    sendResponse({ 
+      success: true, 
+      message: "Job application saved successfully", 
+      data: savedJob,
+      content: savedContent
+    });
+  } catch (error) {
+    console.error("Error saving job application:", error);
+    sendResponse({ 
+      success: false, 
+      error: "Error saving job application: " + error.message 
+    });
+  }
+} 

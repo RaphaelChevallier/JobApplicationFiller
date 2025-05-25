@@ -2403,10 +2403,11 @@ export default function AccountTabs({
   signOut // Received from page.tsx
 }: AccountTabsProps) {
   const [activeTab, setActiveTab] = useState('main');
+  const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
 
   // Updated Tab Classes for Glassmorphism - Increased contrast
   const tabClasses = (tabName: string) => {
-    const baseClasses = "px-4 py-2 text-sm font-medium rounded-t-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500/50 dark:focus:ring-offset-gray-900 transition-all duration-200 ease-in-out border-b-2 cursor-pointer";
+    const baseClasses = "px-3 py-2 text-sm font-medium rounded-t-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500/50 dark:focus:ring-offset-gray-900 transition-all duration-200 ease-in-out border-b-2 cursor-pointer whitespace-nowrap";
     // Active: More opaque bg, stronger text/border
     const activeClasses = "bg-white/40 dark:bg-gray-800/50 backdrop-blur-md border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-md";
     // Inactive: Subtle bg, stronger text/hover contrast
@@ -2415,41 +2416,105 @@ export default function AccountTabs({
     return `${baseClasses} ${activeTab === tabName ? activeClasses : inactiveClasses}`;
   }
 
+  // Dropdown menu tab classes for mobile
+  const dropdownTabClasses = (tabName: string) => {
+    const baseClasses = "block w-full text-left px-4 py-2 text-sm cursor-pointer";
+    const activeClasses = "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300";
+    const inactiveClasses = "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300";
+    
+    return `${baseClasses} ${activeTab === tabName ? activeClasses : inactiveClasses}`;
+  }
+
+  // Get current tab name for display
+  const getCurrentTabName = () => {
+    switch (activeTab) {
+      case 'main': return 'Main Info';
+      case 'files': return 'Files';
+      case 'education': return 'Education';
+      case 'experience': return 'Experience';
+      case 'skills': return 'Skills';
+      case 'languages': return 'Languages';
+      case 'references': return 'References';
+      case 'additional': return 'Additional';
+      default: return 'Main Info';
+    }
+  }
+
+  // Function to handle tab change
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setIsTabMenuOpen(false);
+  }
+
   return (
     // Removed max-w-4xl and mx-auto as it's handled by the parent page container
     <div className="w-full p-4 md:p-6 lg:p-8 rounded-lg">
       {/* Toast container - moved to root level */}
       <Toaster />
       
-      {/* Tab Navigation */}
-      <div className="mb-6"> {/* Removed border-b, handled by tabs */}
-        <nav className="flex space-x-2" aria-label="Tabs"> {/* Reduced space */}
-          <button onClick={() => setActiveTab('main')} className={`${tabClasses('main')} cursor-pointer`}>
-            Main Info
-          </button>
-          {/* Rename Attachments to Files */}
-          <button onClick={() => setActiveTab('files')} className={`${tabClasses('files')} cursor-pointer`}>
-            Files 
-          </button>
-          <button onClick={() => setActiveTab('education')} className={`${tabClasses('education')} cursor-pointer`}>
-            Education
-          </button>
-          <button onClick={() => setActiveTab('experience')} className={`${tabClasses('experience')} cursor-pointer`}>
-            Experience
-          </button>
-          <button onClick={() => setActiveTab('skills')} className={`${tabClasses('skills')} cursor-pointer`}>
-            Skills
-          </button>
-          <button onClick={() => setActiveTab('languages')} className={`${tabClasses('languages')} cursor-pointer`}>
-            Languages
-          </button>
-          <button onClick={() => setActiveTab('references')} className={`${tabClasses('references')} cursor-pointer`}>
-            References
-          </button>
-          <button onClick={() => setActiveTab('additional')} className={`${tabClasses('additional')} cursor-pointer`}>
-            Additional
-          </button>
-        </nav>
+      {/* Mobile Dropdown Menu */}
+      <div className="md:hidden relative mb-4">
+        <button 
+          onClick={() => setIsTabMenuOpen(!isTabMenuOpen)}
+          className="flex items-center justify-between w-full px-4 py-2 text-sm font-medium bg-white/30 dark:bg-gray-800/40 backdrop-blur-md border border-gray-300/50 dark:border-gray-700/50 rounded-lg shadow-sm"
+        >
+          <span>{getCurrentTabName()}</span>
+          <svg 
+            className={`ml-2 h-5 w-5 transition-transform ${isTabMenuOpen ? 'transform rotate-180' : ''}`} 
+            xmlns="http://www.w3.org/2000/svg" 
+            viewBox="0 0 20 20" 
+            fill="currentColor" 
+            aria-hidden="true"
+          >
+            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+
+        {/* Dropdown menu */}
+        {isTabMenuOpen && (
+          <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
+            <button onClick={() => handleTabChange('main')} className={dropdownTabClasses('main')}>Main Info</button>
+            <button onClick={() => handleTabChange('files')} className={dropdownTabClasses('files')}>Files</button>
+            <button onClick={() => handleTabChange('education')} className={dropdownTabClasses('education')}>Education</button>
+            <button onClick={() => handleTabChange('experience')} className={dropdownTabClasses('experience')}>Experience</button>
+            <button onClick={() => handleTabChange('skills')} className={dropdownTabClasses('skills')}>Skills</button>
+            <button onClick={() => handleTabChange('languages')} className={dropdownTabClasses('languages')}>Languages</button>
+            <button onClick={() => handleTabChange('references')} className={dropdownTabClasses('references')}>References</button>
+            <button onClick={() => handleTabChange('additional')} className={dropdownTabClasses('additional')}>Additional</button>
+          </div>
+        )}
+      </div>
+      
+      {/* Desktop Tab Navigation - hidden on small screens */}
+      <div className="hidden md:block mb-6"> {/* Removed border-b, handled by tabs */}
+        <div className="overflow-x-auto pb-1">
+          <nav className="flex space-x-1 min-w-max" aria-label="Tabs"> {/* Reduced space between tabs */}
+            <button onClick={() => setActiveTab('main')} className={`${tabClasses('main')} cursor-pointer`}>
+              Main Info
+            </button>
+            <button onClick={() => setActiveTab('files')} className={`${tabClasses('files')} cursor-pointer`}>
+              Files 
+            </button>
+            <button onClick={() => setActiveTab('education')} className={`${tabClasses('education')} cursor-pointer`}>
+              Education
+            </button>
+            <button onClick={() => setActiveTab('experience')} className={`${tabClasses('experience')} cursor-pointer`}>
+              Experience
+            </button>
+            <button onClick={() => setActiveTab('skills')} className={`${tabClasses('skills')} cursor-pointer`}>
+              Skills
+            </button>
+            <button onClick={() => setActiveTab('languages')} className={`${tabClasses('languages')} cursor-pointer`}>
+              Languages
+            </button>
+            <button onClick={() => setActiveTab('references')} className={`${tabClasses('references')} cursor-pointer`}>
+              References
+            </button>
+            <button onClick={() => setActiveTab('additional')} className={`${tabClasses('additional')} cursor-pointer`}>
+              Additional
+            </button>
+          </nav>
+        </div>
       </div>
 
       {/* Tab Content */}

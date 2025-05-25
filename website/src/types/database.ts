@@ -118,6 +118,37 @@ export type JobData = {
   additional_info: string | null;
 };
 
+// Job Application type
+export type JobApplication = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string | null;
+  job_url: string;
+  job_title: string | null;
+  company_name: string | null;
+  job_description: string | null;
+  job_location: string | null;
+  job_posting_date: string | null;
+  job_id: string | null;
+  application_date: string;
+  application_status: string;
+  notes: string | null;
+  salary_info: string | null;
+};
+
+// Application Content type - stores the content used for each application
+export type ApplicationContent = {
+  id: string;
+  job_application_id: string;
+  resume_used: string | null; // URL to the specific resume used
+  cover_letter_used: string | null; // URL or content of the cover letter used
+  answers_provided: Record<string, string> | null; // JSON object storing form field IDs and the answers provided
+  custom_fields: Record<string, string> | null; // Any additional custom fields/responses
+  created_at: string;
+  updated_at: string | null;
+};
+
 // You might also want to define types for your Supabase schema if using generated types
 // For example, using supabase gen types typescript > types/supabase.ts
 // import { Database } from './supabase';
