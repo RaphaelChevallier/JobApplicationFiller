@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["https://*/*"],
-      "js": ["content.js"],
+      "js": ["ai-instructions-protocol.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

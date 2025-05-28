@@ -2489,31 +2489,31 @@ export default function AccountTabs({
       <div className="hidden md:block mb-6"> {/* Removed border-b, handled by tabs */}
         <div className="overflow-x-auto pb-1">
           <nav className="flex space-x-1 min-w-max" aria-label="Tabs"> {/* Reduced space between tabs */}
-            <button onClick={() => setActiveTab('main')} className={`${tabClasses('main')} cursor-pointer`}>
-              Main Info
-            </button>
-            <button onClick={() => setActiveTab('files')} className={`${tabClasses('files')} cursor-pointer`}>
-              Files 
-            </button>
-            <button onClick={() => setActiveTab('education')} className={`${tabClasses('education')} cursor-pointer`}>
-              Education
-            </button>
-            <button onClick={() => setActiveTab('experience')} className={`${tabClasses('experience')} cursor-pointer`}>
-              Experience
-            </button>
-            <button onClick={() => setActiveTab('skills')} className={`${tabClasses('skills')} cursor-pointer`}>
-              Skills
-            </button>
-            <button onClick={() => setActiveTab('languages')} className={`${tabClasses('languages')} cursor-pointer`}>
-              Languages
-            </button>
-            <button onClick={() => setActiveTab('references')} className={`${tabClasses('references')} cursor-pointer`}>
-              References
-            </button>
-            <button onClick={() => setActiveTab('additional')} className={`${tabClasses('additional')} cursor-pointer`}>
-              Additional
-            </button>
-          </nav>
+          <button onClick={() => setActiveTab('main')} className={`${tabClasses('main')} cursor-pointer`}>
+            Main Info
+          </button>
+          <button onClick={() => setActiveTab('files')} className={`${tabClasses('files')} cursor-pointer`}>
+            Files 
+          </button>
+          <button onClick={() => setActiveTab('education')} className={`${tabClasses('education')} cursor-pointer`}>
+            Education
+          </button>
+          <button onClick={() => setActiveTab('experience')} className={`${tabClasses('experience')} cursor-pointer`}>
+            Experience
+          </button>
+          <button onClick={() => setActiveTab('skills')} className={`${tabClasses('skills')} cursor-pointer`}>
+            Skills
+          </button>
+          <button onClick={() => setActiveTab('languages')} className={`${tabClasses('languages')} cursor-pointer`}>
+            Languages
+          </button>
+          <button onClick={() => setActiveTab('references')} className={`${tabClasses('references')} cursor-pointer`}>
+            References
+          </button>
+          <button onClick={() => setActiveTab('additional')} className={`${tabClasses('additional')} cursor-pointer`}>
+            Additional
+          </button>
+        </nav>
         </div>
       </div>
 

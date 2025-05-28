@@ -608,7 +608,7 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     } catch(e) {
         console.warn(`Could not reset action state for closed tab ${tabId}:`, e.message);
     }
-});
+}); 
 
 // Handler for saving job applications
 async function handleSaveJobApplication(message, sender, sendResponse) {

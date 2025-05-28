@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@1.1.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "std/http/server.ts": "https://deno.land/std@0.208.0/http/server.ts"
+  }
+} 

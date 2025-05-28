@@ -318,7 +318,7 @@ async function checkJobApplicationPage() {
             detectionDetails.push(`Strong URL ('${keyword}')`);
         }
     });
-    
+
     // Only check medium URL indicators if no strong ones found
     if (!detectionDetails.some(detail => detail.includes('Strong URL'))) {
         keywords.urlMedium.list.forEach(keyword => {
@@ -339,7 +339,7 @@ async function checkJobApplicationPage() {
             detectionDetails.push(`Strong Title ('${keyword}')`);
         }
     });
-    
+
     // Check medium title indicators if no strong ones found
     if (!detectionDetails.some(detail => detail.includes('Strong Title'))) {
         keywords.titleMedium.list.forEach(keyword => {
@@ -406,7 +406,7 @@ async function checkJobApplicationPage() {
         
         // Check basic form indicators (limited to avoid over-scoring)
         keywords.formInputBasic.list.forEach(keyword => {
-            if (combinedText.includes(keyword) && !uniqueFormMatches.has(keyword)) {
+             if (combinedText.includes(keyword) && !uniqueFormMatches.has(keyword)) {
                 console.log(` +${keywords.formInputBasic.points} score from Basic Form Input keyword: ${keyword}`);
                 score += keywords.formInputBasic.points;
                 uniqueFormMatches.add(keyword);
@@ -830,6 +830,165 @@ function saveJobApplication(jobInfo) {
     });
 }
 
+// AI-powered form filling functionality
+class AIFormFiller {
+    constructor() {
+        this.isAnalyzing = false;
+        this.isExecuting = false;
+        this.executor = null;
+    }
+
+    async initialize() {
+        // Initialize the AI instruction executor
+        if (typeof AIInstructionExecutor !== 'undefined') {
+            this.executor = new AIInstructionExecutor();
+            console.log('AI Instruction Executor initialized');
+        } else {
+            console.error('AIInstructionExecutor not loaded');
+        }
+    }
+
+    async analyzeAndFillForm() {
+        if (this.isAnalyzing || this.isExecuting) {
+            console.log('AI form analysis already in progress');
+            return { success: false, error: 'Analysis already in progress' };
+        }
+
+        if (!this.executor) {
+            await this.initialize();
+            if (!this.executor) {
+                const error = 'AI instruction executor not available';
+                this.showNotification(error, 'error');
+                return { success: false, error };
+            }
+        }
+
+        try {
+            this.isAnalyzing = true;
+            console.log('Starting AI form analysis...');
+            this.showNotification('Analyzing form with AI...', 'info');
+
+            // Get user profile, settings, and session
+            const { userProfile, supabaseConfig, session } = await chrome.storage.sync.get(['userProfile', 'supabaseConfig', 'session']);
+            
+            if (!userProfile || !supabaseConfig) {
+                throw new Error('User profile or Supabase configuration not found. Please set up your profile first.');
+            }
+
+            if (!session || !session.access_token) {
+                throw new Error('Authentication required. Please sign in again.');
+            }
+
+            console.log('Sending URL to AI for direct analysis...');
+
+            // Call Supabase Edge Function for AI analysis - AI will analyze the URL directly
+            const response = await fetch(`${supabaseConfig.url}/functions/v1/ai-form-analyzer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                    url: window.location.href,
+                    user_id: userProfile.user_id
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`AI analysis failed: ${response.status} - ${errorData.error || 'Unknown error'}`);
+            }
+
+            const instructions = await response.json();
+            
+            if (!instructions.success) {
+                throw new Error('AI analysis returned unsuccessful result');
+            }
+
+            console.log('AI analysis completed:', instructions);
+            this.showNotification(`Analysis complete! Found ${instructions.total_pages} page(s) to fill`, 'success');
+            
+            // Execute the instructions using the standardized executor
+            const result = await this.executor.executeInstructions(instructions);
+            
+            if (result.success) {
+                this.showNotification('AI form filling completed! Please review and submit.', 'success');
+                
+                // Extract and save job information after filling
+                try {
+                    const jobInfo = extractJobInfo();
+                    await saveJobApplication(jobInfo);
+                    console.log('Job application saved after AI filling');
+                } catch (saveError) {
+                    console.warn('Could not save job application after AI filling:', saveError);
+                }
+                
+                return { success: true, log: result.log };
+            } else {
+                throw new Error(result.error);
+            }
+
+        } catch (error) {
+            console.error('AI form analysis failed:', error);
+            this.showNotification('AI form analysis failed: ' + error.message, 'error');
+            return { success: false, error: error.message };
+        } finally {
+            this.isAnalyzing = false;
+        }
+    }
+
+
+
+    showNotification(message, type = 'info') {
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 6px;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 10000;
+            max-width: 300px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: opacity 0.3s ease;
+        `;
+
+        // Set color based on type
+        switch (type) {
+            case 'success':
+                notification.style.backgroundColor = '#10b981';
+                break;
+            case 'error':
+                notification.style.backgroundColor = '#ef4444';
+                break;
+            case 'info':
+            default:
+                notification.style.backgroundColor = '#3b82f6';
+                break;
+        }
+
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        // Remove notification after 5 seconds
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        }, 5000);
+    }
+}
+
+// Initialize AI form filler
+const aiFormFiller = new AIFormFiller();
+
 // Setup message listener for form filling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'START_FILLING') {
@@ -867,12 +1026,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     });
                 } catch (saveError) {
                     console.error("Error saving job application:", saveError);
-                    sendResponse({ 
+                sendResponse({ 
                         status: `Filled ${filledCount} fields but failed to save job: ${saveError.message}`,
                         filledCount: filledCount,
                         savedJob: false,
                         saveError: saveError.message
-                    });
+                });
                 }
             } catch (error) {
                 console.error("Error filling form:", error);
@@ -881,6 +1040,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     error: error.message
                 });
             }
+        });
+        
+        return true; // Keep the message channel open for async response
+    } else if (message.type === 'START_AI_FILLING') {
+        console.log("Received START_AI_FILLING message in content script");
+
+        // Use AI-powered form filling
+        aiFormFiller.analyzeAndFillForm().then(result => {
+            sendResponse({
+                status: result.success ? 'AI form filling completed successfully' : `AI form filling failed: ${result.error}`,
+                success: result.success,
+                error: result.error,
+                log: result.log
+            });
+        }).catch(error => {
+            sendResponse({
+                status: `AI form filling error: ${error.message}`,
+                success: false,
+                error: error.message
+            });
         });
         
         return true; // Keep the message channel open for async response
@@ -894,27 +1073,27 @@ async function runDetectionWithRetry() {
     const delays = [500, 1500, 3000]; // Progressive delays in milliseconds
     
     while (attempts < maxAttempts) {
-        try {
-            const detectionResult = await checkJobApplicationPage();
+    try {
+        const detectionResult = await checkJobApplicationPage(); 
             console.log(`Job Application Filler: Detection Result (attempt ${attempts + 1}):`, detectionResult);
-            
+
             // If we found a job page or this is our last attempt, proceed
             if (detectionResult.isJobPage || attempts === maxAttempts - 1) {
-                // Send message to service worker 
-                chrome.runtime.sendMessage({ 
-                    type: 'PAGE_CHECK_RESULT', 
-                    isJobPage: detectionResult.isJobPage,
+        // Send message to service worker 
+        chrome.runtime.sendMessage({ 
+            type: 'PAGE_CHECK_RESULT', 
+            isJobPage: detectionResult.isJobPage,
                     detectionMethod: detectionResult.method
-                }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        // console.warn("Could not send PAGE_CHECK_RESULT:", chrome.runtime.lastError.message);
-                    }
-                }); 
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                // console.warn("Could not send PAGE_CHECK_RESULT:", chrome.runtime.lastError.message);
+            }
+        }); 
 
-                // Display popup if it's a job page
-                if (detectionResult.isJobPage) {
+        // Display popup if it's a job page
+        if (detectionResult.isJobPage) {
                     console.log("Job page detected, displaying notification popup.");
-                    displayDetectionPopup();
+            displayDetectionPopup();
                 }
                 
                 return; // Exit the retry loop
@@ -925,9 +1104,9 @@ async function runDetectionWithRetry() {
             if (attempts < maxAttempts) {
                 console.log(`Job Application Filler: No job page detected, retrying in ${delays[attempts - 1]}ms...`);
                 await new Promise(resolve => setTimeout(resolve, delays[attempts - 1]));
-            }
-            
-        } catch (error) {
+        }
+        
+    } catch (error) {
             console.error(`Error during job page check (attempt ${attempts + 1}):`, error);
             attempts++;
             if (attempts < maxAttempts) {

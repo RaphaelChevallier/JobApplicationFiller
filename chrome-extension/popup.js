@@ -130,6 +130,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Add click event listener to AI fill button
+    const aiFillButton = document.getElementById('aiFillButton');
+    if (aiFillButton) {
+        aiFillButton.addEventListener('click', function() {
+            // Disable button and show loading state
+            aiFillButton.disabled = true;
+            aiFillButton.textContent = '🤖 Analyzing...';
+            
+            // Send message to content script to start AI filling
+            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'START_AI_FILLING' }, function(response) {
+                    // Re-enable button and restore text
+                    aiFillButton.disabled = false;
+                    aiFillButton.textContent = '🤖 AI Fill Application';
+                    
+                    if (chrome.runtime.lastError) {
+                        console.error('Error sending AI fill message:', chrome.runtime.lastError);
+                        return;
+                    }
+                    
+                    if (response) {
+                        console.log('AI filling response:', response);
+                        // You could show a notification here if needed
+                    }
+                });
+            });
+        });
+    }
+    
     // Helper functions for auth errors
     function showAuthError(message) {
         if (authErrorDiv) {
@@ -153,14 +182,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Update status message
                 if (statusMessage) {
+                    const aiFillButton = document.getElementById('aiFillButton');
                     if (response.isJobPage) {
                         statusMessage.textContent = "This appears to be a job application page.";
                         statusMessage.className = "status-message job-page";
                         if (fillButton) fillButton.disabled = false;
+                        if (aiFillButton) aiFillButton.disabled = false;
                     } else {
                         statusMessage.textContent = "This doesn't appear to be a job application page.";
                         statusMessage.className = "status-message not-job-page";
                         if (fillButton) fillButton.disabled = true;
+                        if (aiFillButton) aiFillButton.disabled = true;
                     }
                 }
             } else {
