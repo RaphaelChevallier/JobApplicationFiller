@@ -1,6 +1,6 @@
 import { serve } from "std/http/server.ts"
 import { createClient } from "@supabase/supabase-js"
-import { GoogleGenAI } from "@google/genai"
+import { GoogleGenAI, Type } from "@google/genai"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -321,6 +321,111 @@ async function generateInstructions(url: string, profile: UserProfile) {
   // Initialize the GoogleGenerativeAI client
   const genAI = new GoogleGenAI({apiKey: geminiApiKey});
 
+  // Define the response schema for structured output
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      success: {
+        type: Type.BOOLEAN,
+        description: "True only if every required field has a non-empty value"
+      },
+      pages: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            page_number: { type: Type.INTEGER },
+            page_url: { type: Type.STRING },
+            page_title: { type: Type.STRING },
+            instructions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: {
+                    type: Type.STRING,
+                    enum: ["fill_field", "select_option", "check_checkbox", "click_button"]
+                  },
+                  selector: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: {
+                        type: Type.STRING,
+                        enum: ["id", "name", "css", "xpath", "placeholder", "aria_label"]
+                      },
+                      value: { type: Type.STRING }
+                    },
+                    required: ["type", "value"]
+                  },
+                  value: { type: Type.STRING },
+                  field_description: { type: Type.STRING },
+                  confidence: {
+                    type: Type.NUMBER,
+                    minimum: 0,
+                    maximum: 1
+                  },
+                  required: { type: Type.BOOLEAN }
+                },
+                required: ["type", "selector", "value", "field_description", "confidence", "required"]
+              }
+            },
+            navigation: {
+              type: Type.OBJECT,
+              properties: {
+                has_next: { type: Type.BOOLEAN },
+                next_button: {
+                  type: Type.OBJECT,
+                  properties: {
+                    selector: {
+                      type: Type.OBJECT,
+                      properties: {
+                        type: { type: Type.STRING },
+                        value: { type: Type.STRING }
+                      },
+                      required: ["type", "value"]
+                    }
+                  }
+                }
+              },
+              required: ["has_next"]
+            },
+            validation: {
+              type: Type.OBJECT,
+              properties: {
+                success_indicators: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                error_indicators: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                }
+              },
+              required: ["success_indicators", "error_indicators"]
+            }
+          },
+          required: ["page_number", "page_url", "page_title", "instructions", "navigation", "validation"]
+        }
+      },
+      total_pages: { type: Type.INTEGER },
+      estimated_completion_time: { type: Type.INTEGER },
+      user_profile_used: {
+        type: Type.OBJECT,
+        properties: {
+          first_name: { type: Type.STRING },
+          last_name: { type: Type.STRING },
+          email: { type: Type.STRING },
+          phone: { type: Type.STRING },
+          address: { type: Type.STRING },
+          city: { type: Type.STRING },
+          state: { type: Type.STRING },
+          zip_code: { type: Type.STRING }
+        }
+      }
+    },
+    required: ["success", "pages", "total_pages", "estimated_completion_time", "user_profile_used"]
+  };
+
   const promptText = `
 You are an AI assistant that helps fill job application forms. You will be given a URL to a job application page and a user profile. Your task is to:
 
@@ -330,45 +435,10 @@ You are an AI assistant that helps fill job application forms. You will be given
 4. Generate precise instructions for filling the form
 
 URL TO ANALYZE: ${url}
+Use the attached tools to fetch and inspect the live page before answering. You must call at least one tool.
 
 USER PROFILE:
 ${JSON.stringify(profile, null, 2)}
-
-Please visit the URL and analyze the job application form. Then generate a response in this EXACT JSON format:
-{
-  "success": true,
-  "pages": [
-    {
-      "page_number": 1,
-      "page_url": "${url}",
-      "page_title": "Job Application Page Title",
-      "instructions": [
-        {
-          "type": "fill_field",
-          "selector": {"type": "id", "value": "firstName"},
-          "value": "John",
-          "field_description": "First Name field",
-          "confidence": 0.95,
-          "required": true
-        }
-      ],
-      "navigation": {
-        "has_next": false
-      },
-      "validation": {
-        "success_indicators": ["Form filled successfully"],
-        "error_indicators": ["Error message", "Required field missing"]
-      }
-    }
-  ],
-  "total_pages": 1,
-  "estimated_completion_time": 30000,
-  "user_profile_used": {
-    "first_name": "${profile.first_name || ''}",
-    "last_name": "${profile.last_name || ''}",
-    "email": "${profile.email || ''}"
-  }
-}
 
 INSTRUCTION TYPES:
 - fill_field: Fill text inputs and textareas
@@ -398,17 +468,16 @@ MATCHING RULES:
 IMPORTANT: You must actually visit and analyze the URL provided. Do not make assumptions about the form structure.
 `;
 
-  const generationConfig = {
-    temperature: 0.1,
-    topK: 1,
-    topP: 1,
-    maxOutputTokens: 4096,
-  };
-
   try {
-    const geminiApiResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const geminiApiResponse = await genAI.models.generateContent({
+      model: "gemini-2.0-flash",
       contents: promptText,
+      config: {
+        temperature: 0.3,
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+        tools: [{urlContext: {}}],
+      },
     });
 
     if (!geminiApiResponse) {
@@ -416,19 +485,22 @@ IMPORTANT: You must actually visit and analyze the URL provided. Do not make ass
         throw new Error('Gemini API (SDK) did not return a response object.');
     }
     
-    const generatedText = geminiApiResponse.text();
-
-    // Parse the JSON response from Gemini
-    const jsonMatch = generatedText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('No valid JSON found in Gemini SDK response text:', generatedText);
-      throw new Error('No valid JSON found in Gemini SDK response text');
+    const generatedText = geminiApiResponse.text;
+    console.log('generatedText', generatedText);
+    console.log('generatedUrlContext', geminiApiResponse.candidates[0].urlContextMetadata)
+    
+    // Only log search metadata if it exists (when googleSearch tool is used)
+    const groundingMetadata = geminiApiResponse.candidates[0]?.groundingMetadata;
+    if (groundingMetadata?.searchEntryPoint?.renderedContent) {
+      console.log('generatedSearchMetadata', groundingMetadata.searchEntryPoint.renderedContent);
     }
 
-    const instructions = JSON.parse(jsonMatch[0]);
+    // Since we're using structured output, the response should already be valid JSON
+    const instructions = JSON.parse(generatedText);
+    console.log('instructions', instructions);
     
     // Validate the response format
-    if (!instructions.success || !Array.isArray(instructions.pages)) {
+    if (instructions.success === undefined || !Array.isArray(instructions.pages)) {
       console.error('Invalid instruction format from Gemini (SDK):', instructions);
       throw new Error('Invalid instruction format from Gemini (SDK)');
     }
